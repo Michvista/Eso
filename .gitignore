@@ -1,0 +1,43 @@
+# Environment
+.env
+.env.local
+venv/
+env/
+ENV/
+HOW_TO_RUN.md
+ML_INTEGRATION.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+*.log
+
+# Django secret/local settings overrides, if you ever add one
+local_settings.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Distribution
+build/
+dist/
+*.egg
+
