@@ -42,7 +42,12 @@ async function refreshAccessToken() {
 async function request(path, options = {}, retry = true) {
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
   if (session.access) headers.Authorization = `Bearer ${session.access}`
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers })
+  let response
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...options, headers })
+  } catch {
+    throw new Error(`Cannot reach the Eso API at ${API_URL}. Start the Django server and try again.`)
+  }
   if (response.status === 401 && retry && await refreshAccessToken()) {
     return request(path, options, false)
   }
