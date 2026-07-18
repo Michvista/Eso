@@ -2,14 +2,17 @@
 Service layer: keeps business logic and external calls out of views.
 
 Tiered AI scoring pipeline:
-  1. Local pickle model (fast, always available, tiny)
-  2. Groq API (rich reasoning for flagged/edge cases)
-  3. External ML service (team-mate's FastAPI endpoint, original default)
+  1. Local pickle model (fast, always available, tiny) — runs first for a quick signal.
+  2. Groq LLM (rich, data-driven reasoning) — runs for EVERY transaction so even
+     safe transfers get a human-readable explanation, not a generic heuristic string.
+  3. External ML service (team-mate's FastAPI endpoint) — fallback if both above fail.
 
 Each tier falls through to the next if unavailable.
 """
 import logging
 from datetime import datetime, timezone
+
+from django.utils import timezone as django_timezone
 
 import requests
 from django.conf import settings
@@ -75,9 +78,9 @@ def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseli
         changed = True
 
     hour = (
-        transaction.created_at.hour
+        django_timezone.localtime(transaction.created_at).hour
         if transaction.created_at
-        else datetime.now(timezone.utc).hour
+        else django_timezone.localtime(django_timezone.now()).hour
     )
     if hour not in baseline.typical_hours:
         baseline.typical_hours = sorted(set(baseline.typical_hours) | {hour})
@@ -127,7 +130,7 @@ def _tier3_external_ml(transaction, baseline) -> dict:
         "recipient": transaction.recipient,
         "amount": float(transaction.amount),
         "device_id": transaction.device_id,
-        "hour_of_day": datetime.now(timezone.utc).hour,
+        "hour_of_day": django_timezone.localtime(transaction.created_at).hour if transaction.created_at else django_timezone.localtime(django_timezone.now()).hour,
         "baseline": {
             "typical_recipients": baseline.typical_recipients,
             "typical_amount_min": float(baseline.typical_amount_min),
@@ -167,13 +170,7 @@ def score_transaction(transaction: Transaction) -> Transaction:
     groq_result = _tier2_groq(transaction, baseline)
 
     if groq_result:
-        # Use Groq's score if it agrees directionally, otherwise blend: Groq
-        # reasoning with the fast tier-1 score as a sanity anchor.
         result = groq_result
-        if tier1 and abs(groq_result["risk_score"] - tier1["risk_score"]) > 0.35:
-            # Large disagreement — average them to avoid runaway LLM scores
-            blended = (groq_result["risk_score"] + tier1["risk_score"]) / 2
-            result = {**groq_result, "risk_score": round(blended, 4)}
     elif tier1:
         result = tier1
     else:

@@ -21,7 +21,11 @@ WEIGHTS = {
 
 
 def _extract_features(transaction, baseline, recent_count=0):
-    hour = datetime.now(timezone.utc).hour
+    from django.utils import timezone as django_timezone
+    if hasattr(transaction, "created_at") and transaction.created_at:
+        hour = django_timezone.localtime(transaction.created_at).hour
+    else:
+        hour = django_timezone.localtime(django_timezone.now()).hour
     typical_min = float(baseline.typical_amount_min)
     typical_max = float(baseline.typical_amount_max)
     amount = float(transaction.amount)
@@ -76,11 +80,16 @@ def _generate_reason(score, features, transaction=None, baseline=None):
         else:
             reasons.append("Recipient is not in your known contacts")
     if features["unusual_hour"] > 0.5:
-        from datetime import datetime, timezone
-        hour = datetime.now(timezone.utc).hour
+        from django.utils import timezone as django_timezone
+        if transaction and transaction.created_at:
+            local_dt = django_timezone.localtime(transaction.created_at)
+        else:
+            local_dt = django_timezone.localtime(django_timezone.now())
+        hour = local_dt.hour
+        minute = local_dt.minute
         period = "night" if hour < 6 or hour >= 22 else "early morning" if hour < 9 else "late evening"
         reasons.append(
-            f"Transfer initiated at {hour:02d}:00 UTC, outside your usual active hours ({period})"
+            f"Transfer initiated at {hour:02d}:{minute:02d}, outside your usual active hours ({period})"
         )
     if features["new_device"] > 0.5:
         reasons.append("Request came from a browser or device not seen in your recent sessions")

@@ -22,8 +22,9 @@ class ServicesTest(TestCase):
         same = services.get_or_create_baseline(str(self.user.id))
         self.assertEqual(baseline.id, same.id)
 
+    @patch("transactions.services._tier2_groq", return_value=None)
     @patch("transactions.services._tier1_local_pkl")
-    def test_score_transaction_approved(self, mock_tier1):
+    def test_score_transaction_approved(self, mock_tier1, _mock_groq):
         mock_tier1.return_value = {"risk_score": 0.3, "reason": "Looks fine"}
         transaction = Transaction.objects.create(
             user_id=str(self.user.id),
@@ -95,7 +96,8 @@ class ServicesTest(TestCase):
             services.apply_user_decision(transaction, "confirm")
 
     def test_score_transaction_creates_ledger_entry(self):
-        with patch("transactions.services._tier1_local_pkl") as mock_tier1:
+        with patch("transactions.services._tier2_groq", return_value=None), \
+             patch("transactions.services._tier1_local_pkl") as mock_tier1:
             mock_tier1.return_value = {"risk_score": 0.3, "reason": "All good"}
             transaction = Transaction.objects.create(
                 user_id=str(self.user.id),
@@ -107,8 +109,9 @@ class ServicesTest(TestCase):
             self.assertEqual(entries.count(), 1)
             self.assertEqual(entries.first().event_type, "scored")
 
+    @patch("transactions.services._tier2_groq", return_value=None)
     @patch("transactions.services._tier1_local_pkl")
-    def test_baseline_updates_on_approved_transaction(self, mock_tier1):
+    def test_baseline_updates_on_approved_transaction(self, mock_tier1, _mock_groq):
         mock_tier1.return_value = {"risk_score": 0.2, "reason": "Routine transfer"}
         transaction = Transaction.objects.create(
             user_id=str(self.user.id),

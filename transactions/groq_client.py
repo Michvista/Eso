@@ -2,6 +2,7 @@ import logging
 import json
 
 from django.conf import settings
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -22,33 +23,49 @@ def _build_analysis_prompt(transaction, baseline):
         if amount < lo or amount > hi
         else f"₦{amount:,.0f} (within typical range ₦{lo:,.0f}–₦{hi:,.0f})"
     )
-    hour = transaction.created_at.hour if transaction.created_at else "Unknown"
+    
+    if transaction.created_at:
+        local_dt = timezone.localtime(transaction.created_at)
+    else:
+        local_dt = timezone.localtime(timezone.now())
+    
+    hour = local_dt.hour
+    time_str = local_dt.strftime("%H:%M")
+    
     typical_hours = baseline.typical_hours or list(range(7, 22))
     hour_context = (
-        f"{hour}:00 (OUTSIDE usual hours {min(typical_hours)}:00–{max(typical_hours)}:00)"
+        f"{time_str} (OUTSIDE usual hours {min(typical_hours)}:00–{max(typical_hours)}:00)"
         if isinstance(hour, int) and hour not in typical_hours
-        else f"{hour}:00 (within usual active hours)"
+        else f"{time_str} (within usual active hours)"
     )
-    return f"""You are Eso, an AI transaction guardian for a Nigerian bank. Analyze this transaction for fraud risk.
+    return f"""You are Eso, a rigorous AI fraud-detection engine for a Nigerian bank. Analyze this transfer and return a calibrated risk score.
 
 TRANSACTION DATA:
 - Recipient: {recipient_context}
 - Amount: {amount_context}
-- Device: {"NEW device not seen before" if transaction.device_id and transaction.device_id not in (baseline.known_devices or []) else "Recognised device"}
+- Device: {"NEW device — not seen before" if transaction.device_id and transaction.device_id not in (baseline.known_devices or []) else "Recognised device"}
 - Time: {hour_context}
-- Total known recipients: {len(known_recipients)}
+- Total known recipients in user history: {len(known_recipients)}
 
-NIGERIAN FRAUD PATTERNS TO CHECK:
-- SIM swap urgency (unknown recipient + large amount)
-- Late-night large wires (post 22:00)
-- New device + high amount = session hijack signal
-- Amounts far above baseline = account takeover pattern
+NIGERIAN FRAUD PATTERNS (detect these explicitly):
+1. SIM-swap: unknown recipient + large or unusual amount → instant urgency
+2. Account takeover: new device + high amount → session hijack
+3. Social-engineering: suspicious recipient name (government titles, urgent keywords, "President", "FG", "EFCC", "refund") → social scam
+4. Late-night wire: transfer post 22:00 or pre-06:00 → high risk
+5. Baseline poisoning: if the user has confirmed a large transfer before, subsequent large transfers may still be risky if the recipient is new
 
-INSTRUCTIONS:
-- Be SPECIFIC: mention the actual amount, recipient name, and hour in your reason.
-- Do NOT say "the recipient is unknown" generically — say WHO the recipient is and WHY it is suspicious or safe.
-- For approved transactions, explain WHY it looks normal (e.g. amount is within range, recipient is known).
-- Reason must be 1-2 sentences max, plain English a bank customer can understand.
+MANDATORY SCORING RULES — you MUST follow these:
+- UNKNOWN recipient + amount > ₦100,000: score ≥ 0.75 (always)
+- UNKNOWN recipient + amount > ₦500,000: score ≥ 0.85
+- Suspicious recipient name (titles, government roles, urgency words): score ≥ 0.80
+- New device + UNKNOWN recipient: add 0.10 to whatever score you compute
+- ALL signals clear (KNOWN recipient, amount in range, known device, normal hours): score ≤ 0.25
+
+LANGUAGE RULES — vary your sentence structure each time:
+- Do NOT always start with "The transaction to X..."
+- Use varied openers like: "Eso flagged this transfer because...", "This ₦X payment raises concerns...", "Sending ₦X to [name] looks suspicious because...", "Your guardian noticed..."
+- Always name the actual recipient and actual amount in naira.
+- 1–2 sentences max. Plain English a non-technical bank customer can read.
 
 Respond ONLY in this exact JSON format:
 {{"risk_score": <0.0 to 1.0>, "reason": "<specific 1-2 sentence explanation with real values>", "red_flags": ["<specific concern with values>"], "suggested_action": "<approve | flag | block>"}}"""
