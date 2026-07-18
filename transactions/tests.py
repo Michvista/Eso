@@ -34,8 +34,9 @@ class ServicesTest(TestCase):
         self.assertEqual(result.status, Transaction.Status.APPROVED)
         self.assertAlmostEqual(result.risk_score, 0.3)
 
+    @patch("transactions.services._tier2_groq", return_value=None)
     @patch("transactions.services._tier1_local_pkl")
-    def test_score_transaction_flagged(self, mock_tier1):
+    def test_score_transaction_flagged(self, mock_tier1, _mock_tier2):
         mock_tier1.return_value = {"risk_score": 0.85, "reason": "Suspicious activity"}
         transaction = Transaction.objects.create(
             user_id=str(self.user.id),
@@ -105,6 +106,35 @@ class ServicesTest(TestCase):
             entries = LedgerEntry.objects.filter(transaction=transaction)
             self.assertEqual(entries.count(), 1)
             self.assertEqual(entries.first().event_type, "scored")
+
+    @patch("transactions.services._tier1_local_pkl")
+    def test_baseline_updates_on_approved_transaction(self, mock_tier1):
+        mock_tier1.return_value = {"risk_score": 0.2, "reason": "Routine transfer"}
+        transaction = Transaction.objects.create(
+            user_id=str(self.user.id),
+            recipient="GTBank - Ada Okafor",
+            amount=85000,
+            device_id="demo-device",
+        )
+        services.score_transaction(transaction)
+        baseline = services.get_or_create_baseline(str(self.user.id))
+        self.assertIn("GTBank - Ada Okafor", baseline.typical_recipients)
+        self.assertIn("demo-device", baseline.known_devices)
+        self.assertGreaterEqual(float(baseline.typical_amount_max), 85000)
+
+    @patch("transactions.services._tier2_groq", return_value=None)
+    def test_baseline_updates_when_user_confirms_flagged(self, _mock_groq):
+        transaction = Transaction.objects.create(
+            user_id=str(self.user.id),
+            recipient="Access Bank - Chidi Eze",
+            amount=1500000,
+            status=Transaction.Status.FLAGGED,
+            risk_score=0.9,
+        )
+        services.apply_user_decision(transaction, "confirm")
+        baseline = services.get_or_create_baseline(str(self.user.id))
+        self.assertIn("Access Bank - Chidi Eze", baseline.typical_recipients)
+        self.assertGreaterEqual(float(baseline.typical_amount_max), 1500000)
 
 
 class TransactionAPITest(TestCase):

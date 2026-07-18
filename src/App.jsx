@@ -189,15 +189,74 @@ function StatusPill({ status }) { const meta = statusMap[status] || statusMap.pe
 
 const banks = ['Access Bank', 'First Bank of Nigeria', 'Guaranty Trust Bank', 'Kuda Bank', 'Opay', 'PalmPay', 'United Bank for Africa', 'Zenith Bank']
 
+const DEMO_SCENARIOS = [
+  {
+    id: 'routine',
+    label: 'Routine family support',
+    tag: 'Usually approved',
+    tone: 'safe',
+    recipient: 'Ada Okafor',
+    bank: 'Guaranty Trust Bank',
+    account: '0123456789',
+    amount: '85000',
+    description: 'Monthly support — sister in Lagos',
+  },
+  {
+    id: 'sim-swap',
+    label: 'SIM swap red flag',
+    tag: 'Fraud pattern',
+    tone: 'warning',
+    recipient: 'Unknown beneficiary',
+    bank: 'Opay',
+    account: '8091234567',
+    amount: '450000',
+    description: 'Urgent transfer — new number requested via SMS',
+  },
+  {
+    id: 'late-night',
+    label: 'Late-night large wire',
+    tag: 'High risk',
+    tone: 'warning',
+    recipient: 'Chidi Eze',
+    bank: 'Access Bank',
+    account: '0987654321',
+    amount: '1500000',
+    description: 'WhatsApp investment contact — send tonight',
+  },
+]
+
+function formatRecipient(bank, name) {
+  return bank ? `${bank} - ${name}` : name
+}
+
+function csvEscape(value) {
+  const str = String(value ?? '')
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
+}
+
 function SendMoney() {
   const navigate = useNavigate(); const [stage, setStage] = useState('form'); const [transaction, setTransaction] = useState(null)
   const [form, setForm] = useState({ recipient: '', bank: '', account: '', amount: '', description: '' }); const [error, setError] = useState(''); const [progress, setProgress] = useState(0)
   const update = (key) => (event) => setForm((value) => ({ ...value, [key]: event.target.value }))
+  const applyScenario = (scenario) => {
+    setForm({
+      recipient: scenario.recipient,
+      bank: scenario.bank,
+      account: scenario.account,
+      amount: scenario.amount,
+      description: scenario.description,
+    })
+    setError('')
+  }
   const submit = async (event) => {
     event.preventDefault(); setError(''); setStage('analysing'); setProgress(12)
     const timer = window.setInterval(() => setProgress((p) => Math.min(p + 17, 89)), 280)
     try {
-      const result = await api.createTransaction({ recipient: form.recipient, amount: Number(form.amount), device_id: navigator.userAgent.slice(0, 150) })
+      const result = await api.createTransaction({
+        recipient: formatRecipient(form.bank, form.recipient),
+        amount: Number(form.amount),
+        device_id: navigator.userAgent.slice(0, 150),
+      })
       setTransaction(result); setProgress(100); await new Promise((resolve) => setTimeout(resolve, 450)); setStage(result.status === 'flagged' ? 'flagged' : 'approved')
     } catch (err) { setError(err.message); setStage('form') } finally { clearInterval(timer) }
   }
@@ -211,12 +270,25 @@ function SendMoney() {
   if (stage === 'flagged') return <Intervention transaction={transaction} onConfirm={() => decide('confirm')} onCancel={() => decide('cancel')} error={error} />
   if (['approved', 'confirmed', 'cancelled'].includes(stage)) return <TransferResult type={stage} transaction={transaction} onReset={reset} onLedger={() => navigate('/ledger')} />
   return <>
-    <PageHeading eyebrow="NEW TRANSFER" title="Send money" copy="Eso analyses each transfer in real time before it leaves your account." />
+    <PageHeading eyebrow="NEW TRANSFER" title="Send money" copy="Eso analyses each transfer in real time before it leaves your account. Amounts are in Nigerian Naira (₦)." />
     <section className="transfer-layout">
       <form className="card transfer-form" onSubmit={submit}>
+        <div className="demo-scenarios">
+          <span className="eyebrow muted">NIGERIAN DEMO SCENARIOS</span>
+          <p>Try a routine transfer first, then a fraud pattern to see Eso intervene.</p>
+          <div className="demo-scenario-grid">
+            {DEMO_SCENARIOS.map((scenario) => (
+              <button key={scenario.id} type="button" className={`demo-scenario ${scenario.tone}`} onClick={() => applyScenario(scenario)}>
+                <span className={`pill ${scenario.tone}`}>{scenario.tag}</span>
+                <b>{scenario.label}</b>
+                <small>{formatRecipient(scenario.bank, scenario.recipient)} · {naira.format(Number(scenario.amount))}</small>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="form-step"><span>1</span><div><b>Recipient details</b><small>Who are you sending money to?</small></div></div>
         <div className="form-grid">
-          <label className="span-2">Recipient name<input required value={form.recipient} onChange={update('recipient')} placeholder="Enter their full name" /></label>
+          <label className="span-2">Recipient name<input required value={form.recipient} onChange={update('recipient')} placeholder="e.g. Ada Okafor" /></label>
           <label>Bank<select required value={form.bank} onChange={update('bank')}><option value="">Select bank</option>{banks.map((bank) => <option key={bank}>{bank}</option>)}</select></label>
           <label>Account number<input required inputMode="numeric" pattern="[0-9]{10}" maxLength="10" value={form.account} onChange={update('account')} placeholder="0123456789" /></label>
         </div>
@@ -227,7 +299,7 @@ function SendMoney() {
         {error && <div className="form-error"><TriangleAlert size={17} />{error}</div>}
         <button className="button primary full" type="submit">Review with Eso <ArrowRight size={18} /></button>
       </form>
-      <aside className="transfer-aside"><div className="guardian-visual"><span><ShieldCheck /></span><i className="orbit o1" /><i className="orbit o2" /></div><span className="eyebrow">ESO GUARDIAN</span><h2>Protection without the friction.</h2><p>Routine transfers move quietly. When something breaks your normal pattern, Eso explains exactly why before you decide.</p><div className="aside-points"><span><Check /> Behaviour-aware scoring</span><span><Check /> Plain-language warnings</span><span><Check /> Every decision recorded</span></div></aside>
+      <aside className="transfer-aside"><div className="guardian-visual"><span><ShieldCheck /></span><i className="orbit o1" /><i className="orbit o2" /></div><span className="eyebrow">ESO GUARDIAN</span><h2>Built for Nigerian banking fraud patterns.</h2><p>Eso learns your GTBank, Opay, and UBA habits — then challenges SIM-swap urgency, late-night wires, and unknown beneficiaries before money leaves.</p><div className="aside-points"><span><Check /> Learns recipients after safe transfers</span><span><Check /> Flags SIM swap &amp; odd-hour patterns</span><span><Check /> Every decision recorded in ₦</span></div></aside>
     </section>
   </>
 }
@@ -266,9 +338,30 @@ function Ledger() {
   useEffect(() => { getLedgerWithTransactions().then(setItems).catch(() => {}).finally(() => setLoading(false)) }, [])
   const unique = [...new Map(items.map((item) => [item.transaction, { ...item.transactionDetail, ledgerEvent: item.event_type, ledgerDetail: item.detail }])).values()].filter((item) => item.id)
   const filtered = unique.filter((t) => (filter === 'all' || t.status === filter || (filter === 'confirmed' && t.status === 'confirmed')) && `${t.recipient} ${t.id}`.toLowerCase().includes(query.toLowerCase()))
-  const exportLedger = () => { const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `eso-ledger-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(url) }
+  const exportLedger = () => {
+    const headers = ['Date', 'Recipient', 'Amount (NGN)', 'Status', 'Risk Score', 'Risk Reason', 'Event', 'Detail', 'Transaction ID']
+    const rows = filtered.map((t) => [
+      new Date(t.created_at).toISOString(),
+      t.recipient,
+      t.amount,
+      t.status,
+      t.risk_score ?? '',
+      t.risk_reason ?? '',
+      t.ledgerEvent ?? '',
+      t.ledgerDetail ?? '',
+      t.id,
+    ])
+    const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n')
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `eso-ledger-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
   return <>
-    <PageHeading eyebrow="AUDIT TRAIL" title="Transparency ledger" copy="Every AI assessment and user decision is recorded here." action={<button className="button secondary" onClick={exportLedger}><Download size={17} />Export records</button>} />
+    <PageHeading eyebrow="AUDIT TRAIL" title="Transparency ledger" copy="Every AI assessment and user decision is recorded here — export for auditors or judges." action={<button className="button secondary" onClick={exportLedger}><Download size={17} />Export CSV</button>} />
     <div className="ledger-toolbar"><div className="ledger-search"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search recipient or transaction ID" /></div><div className="filter-tabs">{[['all','All'],['approved','Approved'],['flagged','Flagged'],['confirmed','Overrides'],['cancelled','Cancelled']].map(([value,label]) => <button key={value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}<span>{value === 'all' ? unique.length : unique.filter((t) => t.status === value).length}</span></button>)}</div></div>
     <div className="ledger-layout"><aside className="card ledger-summary"><span className="eyebrow muted">YOUR RECORD</span><h3>Decision overview</h3><div className="ledger-stat"><span>Transfers analysed</span><b>{unique.length}</b></div><div className="ledger-stat safe"><span>Approved</span><b>{unique.filter((t) => t.status === 'approved').length}</b></div><div className="ledger-stat warning"><span>Flagged / override</span><b>{unique.filter((t) => ['flagged','confirmed'].includes(t.status)).length}</b></div><div className="ledger-stat danger"><span>Cancelled</span><b>{unique.filter((t) => t.status === 'cancelled').length}</b></div><div className="tamper-note"><LockKeyhole /><p><b>Tamper-evident record</b><small>Eso preserves a clear trail of how every decision was made.</small></p></div></aside>
       <section className="ledger-list">{loading ? <div className="card"><LoadingRows /></div> : filtered.length ? filtered.map((t) => <LedgerCard key={t.id} transaction={t} expanded={expanded === t.id} toggle={() => setExpanded(expanded === t.id ? null : t.id)} />) : <div className="card"><EmptyState icon={Search} title="No matching entries" copy="Try another filter or make a transfer to create a record." /></div>}</section></div>
@@ -289,7 +382,7 @@ function SettingsPage() {
     <PageHeading eyebrow="PREFERENCES" title="Settings" copy="Manage your profile, guardian behaviour and notifications." />
     <div className="settings-grid">
       <section className="card settings-card"><div className="settings-title"><span><UserRound /></span><div><h2>Profile information</h2><p>Your Eso account and protection status.</p></div></div><div className="profile-row"><span className="avatar large">{user.username[0].toUpperCase()}</span><div><span className="status-dot safe">FULLY VERIFIED</span><h3>{user.username}</h3><p>{user.email || 'No email supplied'}</p></div></div></section>
-      <section className="card settings-card span-2"><div className="settings-title"><span><Shield /></span><div><h2>AI security protocol</h2><p>Choose how assertively Eso monitors unusual behaviour.</p></div></div><div className="protection-levels">{[['standard','Standard','Known malicious patterns only.'],['guardian','Guardian','Recommended. Learns your habits and challenges anomalies.'],['maximum','Maximum','Every new recipient requires review.']].map(([value,title,copy]) => <button key={value} className={level === value ? 'active' : ''} onClick={() => chooseLevel(value)}><span>{level === value && <Check />}</span><b>{title}</b><p>{copy}</p></button>)}</div><div className="baseline-line"><span><b>Behaviour profile</b><small>{baseline ? `${baseline.typical_recipients.length} known recipients · typical ceiling ${compactNaira.format(baseline.typical_amount_max)}` : 'Loading learned baseline…'}</small></span><BrainCircuit /></div></section>
+      <section className="card settings-card span-2"><div className="settings-title"><span><Shield /></span><div><h2>AI security protocol</h2><p>Choose how assertively Eso monitors unusual behaviour.</p></div></div><div className="protection-levels">{[['standard','Standard','Known malicious patterns only.'],['guardian','Guardian','Recommended. Learns your habits and challenges anomalies.'],['maximum','Maximum','Every new recipient requires review.']].map(([value,title,copy]) => <button key={value} className={level === value ? 'active' : ''} onClick={() => chooseLevel(value)}><span>{level === value && <Check />}</span><b>{title}</b><p>{copy}</p></button>)}</div><div className="baseline-line"><span><b>Behaviour profile</b><small>{baseline ? `${baseline.typical_recipients.length} known recipients · typical range ${compactNaira.format(baseline.typical_amount_min)} – ${compactNaira.format(baseline.typical_amount_max)} · updates after safe transfers` : 'Loading learned baseline…'}</small></span><BrainCircuit /></div></section>
       <section className="card settings-card span-2"><div className="settings-title"><span><Bell /></span><div><h2>AI notifications</h2><p>Control when the guardian communicates with you.</p></div></div>{[['anomalies','Anomaly alerts','Unusual spending patterns and high-risk transfers.'],['weekly','Weekly protection summary','A concise report of activity and interventions.'],['routine','Routine confirmations','Notifications for normal, recurring transfers.']].map(([key,title,copy]) => <div className="toggle-row" key={key}><span><b>{title}</b><small>{copy}</small></span><button className={`toggle ${prefs[key] ? 'on' : ''}`} onClick={() => setPrefs((p) => ({ ...p, [key]: !p[key] }))}><i /></button></div>)}</section>
       <section className="card setting-action"><span className="settings-action-icon"><Download /></span><h3>Transparency records</h3><p>Your full decision history is available from the ledger.</p><a className="button primary full" href="/ledger">Open ledger</a></section>
       <section className="card setting-action"><span className="settings-action-icon"><Moon /></span><h3>Appearance</h3><p>Use the interface that is most comfortable for you.</p><button className="button secondary full" onClick={toggleDark}>{dark ? <Sun size={17} /> : <Moon size={17} />}{dark ? 'Use light mode' : 'Use dark mode'}</button></section>

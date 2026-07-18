@@ -5,8 +5,7 @@ from django.db import models
 class BehaviorBaseline(models.Model):
     """
     A user's learned 'normal' — typical recipients, amount range, timing.
-    For the hackathon demo this is seeded/mocked rather than truly learned
-    over time, but the shape matches what a real baseline would look like.
+    Updated automatically when transfers are approved or user-confirmed.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

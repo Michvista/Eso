@@ -45,6 +45,58 @@ def _recent_transaction_count(user_id: str) -> int:
     return Transaction.objects.filter(user_id=user_id).count()
 
 
+def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseline:
+    """
+    Expand the user's learned profile after a transfer completes safely
+    (auto-approved or user-confirmed after a flag).
+    """
+    baseline = get_or_create_baseline(transaction.user_id)
+    amount = float(transaction.amount)
+    changed = False
+
+    recipient = transaction.recipient.strip()
+    if recipient and recipient not in baseline.typical_recipients:
+        recipients = list(baseline.typical_recipients) + [recipient]
+        baseline.typical_recipients = recipients[-25:]
+        changed = True
+
+    if transaction.device_id and transaction.device_id not in baseline.known_devices:
+        devices = list(baseline.known_devices) + [transaction.device_id]
+        baseline.known_devices = devices[-10:]
+        changed = True
+
+    current_min = float(baseline.typical_amount_min)
+    current_max = float(baseline.typical_amount_max)
+    if amount < current_min or current_min == 0:
+        baseline.typical_amount_min = amount
+        changed = True
+    if amount > current_max:
+        baseline.typical_amount_max = amount
+        changed = True
+
+    hour = (
+        transaction.created_at.hour
+        if transaction.created_at
+        else datetime.now(timezone.utc).hour
+    )
+    if hour not in baseline.typical_hours:
+        baseline.typical_hours = sorted(set(baseline.typical_hours) | {hour})
+        changed = True
+
+    if changed:
+        baseline.save(update_fields=[
+            "typical_recipients",
+            "known_devices",
+            "typical_amount_min",
+            "typical_amount_max",
+            "typical_hours",
+            "updated_at",
+        ])
+        logger.info("Baseline updated for user %s", transaction.user_id)
+
+    return baseline
+
+
 def _tier1_local_pkl(transaction, baseline) -> dict | None:
     try:
         recent_count = _recent_transaction_count(transaction.user_id)
@@ -148,6 +200,9 @@ def score_transaction(transaction: Transaction) -> Transaction:
         detail=f"[{source}] risk_score={result['risk_score']:.2f}; {result['reason']}",
     )
 
+    if transaction.status == Transaction.Status.APPROVED:
+        update_baseline_from_transaction(transaction)
+
     return transaction
 
 
@@ -170,5 +225,8 @@ def apply_user_decision(transaction: Transaction, decision: str) -> Transaction:
         event_type="overridden" if decision == "confirm" else "cancelled",
         detail=detail,
     )
+
+    if decision == "confirm":
+        update_baseline_from_transaction(transaction)
 
     return transaction
