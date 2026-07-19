@@ -12,6 +12,10 @@ SECRET_KEY = config("DJANGO_SECRET_KEY", default="hackathon-dev-key-change-me")
 DEBUG = config("DEBUG", default=True, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*").split(",")
 
+# Render free-tier hostname (auto-injected via RENDER_EXTERNAL_HOSTNAME)
+if not DEBUG and config("RENDER_EXTERNAL_HOSTNAME", default=""):
+    ALLOWED_HOSTS.append(config("RENDER_EXTERNAL_HOSTNAME"))
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -116,6 +120,10 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+# In production, also allow the Vercel frontend to call the Render backend
+if config("VERCEL_FRONTEND_URL", default=""):
+    CORS_ALLOWED_ORIGINS.append(config("VERCEL_FRONTEND_URL"))
+CORS_ALLOW_CREDENTIALS = True
 
 # --- AI features ---
 # Groq API for advanced transaction reasoning.

@@ -78,8 +78,14 @@ def get_or_create_baseline(user_id: str) -> BehaviorBaseline:
     return baseline
 
 
-def _recent_transaction_count(user_id: str) -> int:
-    return Transaction.objects.filter(user_id=user_id).count()
+def _recent_transaction_count(user_id: str, within_hours: int = 168) -> int:
+    from .ml_model import _recent_transaction_count as _windowed_count
+    return _windowed_count(user_id, within_hours)
+
+
+def _recent_large_amount_count(user_id: str) -> int:
+    from .ml_model import _recent_large_amount_count as _windowed_large
+    return _windowed_large(user_id)
 
 
 def recipient_report_summary(recipient_account_id: str) -> dict:
@@ -139,13 +145,48 @@ def _risk_tier(score: float) -> str:
     return Transaction.RiskTier.LOW
 
 
+def _recompute_amount_range(baseline: BehaviorBaseline) -> tuple[float, float]:
+    """
+    Recompute amount range from a sliding window of approved transactions.
+    Keeps the existing range if there aren't enough data points yet.
+    """
+    recent = (
+        Transaction.objects
+        .filter(user_id=baseline.user_id, status__in=[
+            Transaction.Status.APPROVED,
+            Transaction.Status.CONFIRMED,
+            Transaction.Status.REVIEW_APPROVED,
+        ])
+        .order_by("-created_at")[:50]
+    )
+    amounts = [float(t.amount) for t in recent]
+    n = len(amounts)
+    if n == 0:
+        return (0.0, 50000.0)
+    # Need a minimum number of data points for percentile-based range
+    if n < 5:
+        # Keep existing baseline range — too few data points to recalc reliably
+        return (float(baseline.typical_amount_min), float(baseline.typical_amount_max))
+    # Use 10th and 90th percentiles for robustness against outliers
+    amounts_sorted = sorted(amounts)
+    idx_low = max(0, int(n * 0.1))
+    idx_high = min(n - 1, int(n * 0.9))
+    lo = amounts_sorted[idx_low]
+    hi = amounts_sorted[idx_high]
+    if hi <= lo:
+        hi = max(amounts)
+    return (lo, hi)
+
+
 def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseline:
     """
     Expand the user's learned profile after a transfer completes safely
     (auto-approved or user-confirmed after a flag).
+
+    Uses a sliding window of the last 50 approved transactions for amount range,
+    preventing a single large transfer from permanently expanding the baseline.
     """
     baseline = get_or_create_baseline(transaction.user_id)
-    amount = float(transaction.amount)
     changed = False
 
     recipient = transaction.recipient.strip()
@@ -159,15 +200,6 @@ def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseli
         baseline.known_devices = devices[-10:]
         changed = True
 
-    current_min = float(baseline.typical_amount_min)
-    current_max = float(baseline.typical_amount_max)
-    if amount < current_min or current_min == 0:
-        baseline.typical_amount_min = amount
-        changed = True
-    if amount > current_max:
-        baseline.typical_amount_max = amount
-        changed = True
-
     hour = (
         django_timezone.localtime(transaction.created_at).hour
         if transaction.created_at
@@ -175,6 +207,13 @@ def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseli
     )
     if hour not in baseline.typical_hours:
         baseline.typical_hours = sorted(set(baseline.typical_hours) | {hour})
+        changed = True
+
+    # Recompute amount range from sliding window
+    lo, hi = _recompute_amount_range(baseline)
+    if abs(float(baseline.typical_amount_min) - lo) > 0.01 or abs(float(baseline.typical_amount_max) - hi) > 0.01:
+        baseline.typical_amount_min = lo
+        baseline.typical_amount_max = hi
         changed = True
 
     if changed:
@@ -194,7 +233,8 @@ def update_baseline_from_transaction(transaction: Transaction) -> BehaviorBaseli
 def _tier1_local_pkl(transaction, baseline) -> dict | None:
     try:
         recent_count = _recent_transaction_count(transaction.user_id)
-        result = risk_model.predict(transaction, baseline, recent_count)
+        recent_large_count = _recent_large_amount_count(transaction.user_id)
+        result = risk_model.predict(transaction, baseline, recent_count, recent_large_count)
         logger.info("Tier 1 (pkl): score=%.4f", result["risk_score"])
         return result
     except Exception as e:
