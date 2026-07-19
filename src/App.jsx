@@ -10,11 +10,6 @@ import {
 import { api, getLedgerWithTransactions, session } from './lib/api'
 
 const AuthContext = createContext(null)
-const TEST_ACCOUNT = {
-  username: 'eso_demo',
-  email: 'demo@eso.ng',
-  password: 'EsoDemo123!',
-}
 const naira = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 })
 const compactNaira = new Intl.NumberFormat('en-NG', { notation: 'compact', style: 'currency', currency: 'NGN' })
 const statusMap = {
@@ -69,18 +64,6 @@ function AuthPage() {
       else await register(form)
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
-  const useTestAccount = async () => {
-    setMode('login'); setForm(TEST_ACCOUNT); setError(''); setBusy(true)
-    try {
-      await login({ username: TEST_ACCOUNT.username, password: TEST_ACCOUNT.password })
-    } catch {
-      try {
-        await register(TEST_ACCOUNT)
-      } catch (err) {
-        setError(err.message)
-      }
-    } finally { setBusy(false) }
-  }
   return <main className="auth-page">
     <div className="auth-art" aria-hidden="true">
       <div className="auth-orb orb-one" /><div className="auth-orb orb-two" />
@@ -109,11 +92,6 @@ function AuthPage() {
           {error && <div className="form-error"><TriangleAlert size={16} />{error}</div>}
           <button className="button primary full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18} /> : null}{mode === 'login' ? 'Sign in securely' : 'Create account'}<ArrowRight size={18} /></button>
         </form>
-        <div className="test-account">
-          <div className="test-account-head"><span><Sparkles size={15} /> Hackathon test account</span><small>Creates itself on first use</small></div>
-          <div className="test-credentials"><span><small>Username</small><code>{TEST_ACCOUNT.username}</code></span><span><small>Password</small><code>{TEST_ACCOUNT.password}</code></span></div>
-          <button className="button secondary full" type="button" disabled={busy} onClick={useTestAccount}>{busy ? <LoaderCircle className="spin" size={17} /> : <UserRound size={17} />}Use test account</button>
-        </div>
         <small className="auth-note"><LockKeyhole size={13} /> Your session is protected with secure access tokens.</small>
       </div>
     </section>
